@@ -1,7 +1,7 @@
 import sys
 from pdf2docx import Converter
 
-def convert_pdf_to_docx(pdf_path):
+def pdf_to_docx(pdf_path):
     try:
         # Derive the output DOCX path from the input PDF path
         docx_path = pdf_path.replace('.pdf', '.docx')
@@ -19,7 +19,7 @@ if len(sys.argv) < 2:
     sys.exit(1)
 
 pdf_path = sys.argv[1]
-success, docx_path = convert_pdf_to_docx(pdf_path)
+success, docx_path = pdf_to_docx(pdf_path)
 
 if success:
     print(f"PDF converted to DOCX successfully: {docx_path}")
