@@ -1,10 +1,15 @@
 # Use a Node.js base image with Python support
 FROM node:22-bullseye
 
-# Install Python and build tools
+# Install system dependencies including GUI libraries
 RUN apt-get update && \
-    apt-get install -y python3 python3-pip && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y \
+    python3 \
+    python3-pip \
+    libgl1 \
+    libglib2.0-0 \
+    libgl1-mesa-glx \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
