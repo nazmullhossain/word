@@ -5,208 +5,249 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDF to DOCX Converter</title>
   <style>
+    :root {
+      --primary-color: #4285f4;
+      --success-color: #34a853;
+      --error-color: #ea4335;
+      --border-color: #dadce0;
+      --text-color: #202124;
+      --secondary-text: #5f6368;
+    }
+    
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-family: 'Roboto', Arial, sans-serif;
       max-width: 600px;
       margin: 0 auto;
       padding: 20px;
-      color: #333;
+      color: var(--text-color);
       line-height: 1.6;
     }
+    
     h1 {
-      color: #2c3e50;
+      color: var(--primary-color);
       text-align: center;
       margin-bottom: 30px;
     }
+    
     .upload-container {
-      border: 2px dashed #7f8c8d;
+      border: 2px dashed var(--border-color);
       padding: 30px;
       margin: 20px 0;
       border-radius: 8px;
       text-align: center;
-      transition: all 0.3s;
+      transition: all 0.3s ease;
     }
-    .upload-container:hover {
-      border-color: #3498db;
+    
+    .upload-container.active {
+      border-color: var(--primary-color);
       background-color: #f8f9fa;
     }
+    
+    .upload-container.error {
+      border-color: var(--error-color);
+    }
+    
     #fileInput {
       display: none;
     }
+    
     .btn {
-      background: #3498db;
+      background: var(--primary-color);
       color: white;
       padding: 12px 24px;
       border: none;
-      border-radius: 6px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 16px;
-      transition: background 0.3s;
-      margin: 10px 5px;
+      font-weight: 500;
+      transition: background 0.3s ease;
+      margin: 10px;
     }
+    
     .btn:hover {
-      background: #2980b9;
+      background: #3367d6;
     }
+    
     .btn:disabled {
-      background: #95a5a6;
+      background: #cccccc;
       cursor: not-allowed;
     }
-    #fileName {
-      margin: 15px 0;
-      font-weight: bold;
-      word-break: break-all;
-    }
+    
     #status {
       margin: 20px 0;
       min-height: 24px;
       text-align: center;
       font-weight: 500;
     }
-    .success {
-      color: #27ae60;
+    
+    .status-success {
+      color: var(--success-color);
     }
-    .error {
-      color: #e74c3c;
+    
+    .status-error {
+      color: var(--error-color);
     }
+    
     #downloadLink {
       display: none;
       margin-top: 20px;
       text-align: center;
-      animation: fadeIn 0.5s;
     }
-    #downloadAnchor {
+    
+    .download-btn {
       display: inline-block;
-      background: #2ecc71;
+      background: var(--success-color);
       color: white;
       padding: 12px 24px;
-      border-radius: 6px;
+      border-radius: 4px;
       text-decoration: none;
-      margin-top: 10px;
-      transition: background 0.3s;
+      font-weight: 500;
+      transition: background 0.3s ease;
     }
-    #downloadAnchor:hover {
-      background: #27ae60;
+    
+    .download-btn:hover {
+      background: #2d9246;
     }
+    
     .spinner {
       border: 4px solid rgba(0, 0, 0, 0.1);
-      width: 40px;
-      height: 40px;
+      width: 36px;
+      height: 36px;
       border-radius: 50%;
-      border-left-color: #3498db;
+      border-left-color: var(--primary-color);
       animation: spin 1s linear infinite;
       margin: 20px auto;
       display: none;
     }
+    
+    #fileInfo {
+      margin: 15px 0;
+      font-size: 14px;
+      color: var(--secondary-text);
+    }
+    
+    #fileSize {
+      font-weight: normal;
+      color: var(--secondary-text);
+    }
+    
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-    .file-info {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      margin: 15px 0;
-    }
-    .file-icon {
-      font-size: 24px;
-    }
+    
     .drag-hint {
-      color: #7f8c8d;
       font-size: 14px;
+      color: var(--secondary-text);
       margin-top: 15px;
+    }
+    
+    footer {
+      margin-top: 40px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--secondary-text);
     }
   </style>
 </head>
 <body>
   <h1>PDF to DOCX Converter</h1>
-  <div class="upload-container" id="dropZone">
+  <div class="upload-container" id="uploadContainer">
     <input type="file" id="fileInput" accept=".pdf">
-    <button class="btn" onclick="document.getElementById('fileInput').click()">Choose PDF File</button>
+    <button class="btn" id="selectBtn">Select PDF File</button>
     <p class="drag-hint">or drag and drop file here</p>
-    <div class="file-info">
-      <span class="file-icon" id="fileIcon">📄</span>
-      <p id="fileName">No file selected</p>
+    <div id="fileInfo">
+      <p id="fileName"></p>
+      <p id="fileSize"></p>
     </div>
     <button class="btn" id="convertBtn" disabled>Convert to DOCX</button>
   </div>
-  
   <div id="status"></div>
   <div class="spinner" id="spinner"></div>
-  
   <div id="downloadLink">
-    <p class="success">Conversion complete!</p>
-    <a id="downloadAnchor" href="#" download>Download DOCX File</a>
+    <p class="status-success">Conversion complete!</p>
+    <a class="download-btn" id="downloadAnchor" href="#" download>Download DOCX File</a>
   </div>
 
+  <footer>
+    <p>Convert PDF documents to editable Word files quickly and securely</p>
+  </footer>
+
   <script>
+    // DOM Elements
     const fileInput = document.getElementById('fileInput');
+    const selectBtn = document.getElementById('selectBtn');
     const convertBtn = document.getElementById('convertBtn');
+    const uploadContainer = document.getElementById('uploadContainer');
     const fileNameDisplay = document.getElementById('fileName');
-    const fileIcon = document.getElementById('fileIcon');
+    const fileSizeDisplay = document.getElementById('fileSize');
     const statusDisplay = document.getElementById('status');
     const downloadLink = document.getElementById('downloadLink');
     const downloadAnchor = document.getElementById('downloadAnchor');
     const spinner = document.getElementById('spinner');
-    const dropZone = document.getElementById('dropZone');
+    const fileInfo = document.getElementById('fileInfo');
+
+    // Format file size
+    const formatFileSize = (bytes) => {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i]);
+    };
 
     // Handle file selection
-    fileInput.addEventListener('change', handleFileSelect);
+    const handleFileSelection = (file) => {
+      if (!file) return;
+      
+      if (file.type !== 'application/pdf') {
+        statusDisplay.textContent = 'Please select a PDF file';
+        statusDisplay.className = 'status-error';
+        uploadContainer.classList.add('error');
+        return;
+      }
+      
+      uploadContainer.classList.remove('error');
+      fileNameDisplay.textContent = file.name;
+      fileSizeDisplay.textContent = formatFileSize(file.size);
+      fileInfo.style.display = 'block';
+      convertBtn.disabled = false;
+    };
 
-    // Drag and drop functionality
-    dropZone.addEventListener('dragover', (e) => {
+    // Drag and drop handlers
+    uploadContainer.addEventListener('dragover', (e) => {
       e.preventDefault();
-      dropZone.style.borderColor = '#3498db';
-      dropZone.style.backgroundColor = '#ebf5fb';
+      uploadContainer.classList.add('active');
     });
 
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.style.borderColor = '#7f8c8d';
-      dropZone.style.backgroundColor = '';
+    uploadContainer.addEventListener('dragleave', () => {
+      uploadContainer.classList.remove('active');
     });
 
-    dropZone.addEventListener('drop', (e) => {
+    uploadContainer.addEventListener('drop', (e) => {
       e.preventDefault();
-      dropZone.style.borderColor = '#7f8c8d';
-      dropZone.style.backgroundColor = '';
+      uploadContainer.classList.remove('active');
       
       if (e.dataTransfer.files.length) {
         fileInput.files = e.dataTransfer.files;
-        handleFileSelect({ target: fileInput });
+        handleFileSelection(e.dataTransfer.files[0]);
       }
     });
 
-    function handleFileSelect(e) {
-      if (e.target.files.length > 0) {
-        const file = e.target.files[0];
-        fileNameDisplay.textContent = file.name;
-        fileIcon.textContent = '📄';
-        convertBtn.disabled = false;
-        
-        // Reset previous state
-        statusDisplay.textContent = '';
-        statusDisplay.className = '';
-        downloadLink.style.display = 'none';
-      }
-    }
+    // File input change handler
+    fileInput.addEventListener('change', (e) => {
+      handleFileSelection(e.target.files[0]);
+    });
 
-    // Conversion handler
-    convertBtn.addEventListener('click', convertFile);
+    // Select button handler
+    selectBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
 
-    async function convertFile() {
+    // Convert button handler
+    convertBtn.addEventListener('click', async () => {
       const file = fileInput.files[0];
       if (!file) return;
-
-      // Validate file type
-      if (!file.name.toLowerCase().endsWith('.pdf')) {
-        statusDisplay.textContent = 'Error: Please select a PDF file';
-        statusDisplay.className = 'error';
-        return;
-      }
 
       const formData = new FormData();
       formData.append('pdfFile', file);
@@ -224,31 +265,41 @@
           body: formData
         });
 
+        const data = await response.json();
+
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `Server error: ${response.status}`);
+          throw new Error(data.error || 'Conversion failed');
         }
 
-        // Handle the response as a file download
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        // Success case
         statusDisplay.textContent = 'Conversion successful!';
-        statusDisplay.className = 'success';
+        statusDisplay.className = 'status-success';
+        
+        // Create download link
+        const blob = new Blob([data.file], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+        const url = URL.createObjectURL(blob);
         
         downloadAnchor.href = url;
-        downloadAnchor.download = file.name.replace('.pdf', '.docx');
+        downloadAnchor.download = data.fileName || 'converted.docx';
         downloadLink.style.display = 'block';
-
+        
       } catch (error) {
         console.error('Conversion error:', error);
         statusDisplay.textContent = `Error: ${error.message}`;
-        statusDisplay.className = 'error';
+        statusDisplay.className = 'status-error';
+        uploadContainer.classList.add('error');
       } finally {
         spinner.style.display = 'none';
         convertBtn.disabled = false;
       }
-    }
+    });
+
+    // Initialize
+    fileInfo.style.display = 'none';
   </script>
 </body>
 </html>
