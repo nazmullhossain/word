@@ -27,73 +27,78 @@ const upload = multer({ storage });
 // Serve static files
 app.use(express.static('public'));
 
-// POST endpoint for PDF to DOCX conversion
-app.post('/convert', upload.single('pdfFile'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+app.post('/convert', upload.single('pdfFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    console.log('Received file:', req.file.originalname);
+    const pdfPath = path.resolve(req.file.path);
+    const outputDir = process.env.TMPDIR || '/tmp';
+    const outputFileName = `${path.parse(req.file.originalname).name}.docx`;
+    const outputPath = path.join(outputDir, outputFileName);
+
+    console.log('Conversion paths:', { pdfPath, outputPath });
+
+    // Verify Python script exists
+    const pythonScript = path.join(__dirname, 'pdf-to-docx', 'pdf-to-docx-python-script.py');
+    if (!fs.existsSync(pythonScript)) {
+      throw new Error(`Python script not found at ${pythonScript}`);
+    }
+
+    const options = {
+      mode: 'text',
+      pythonPath: process.env.PYTHON_PATH || 'python3',
+      scriptPath: path.dirname(pythonScript),
+      args: [pdfPath, outputDir]
+    };
+
+    console.log('PythonShell options:', options);
+
+    const conversionResult = await new Promise((resolve, reject) => {
+      const pyshell = new PythonShell(path.basename(pythonScript), options);
+      let output = '';
+
+      pyshell.on('message', (message) => {
+        console.log('Python:', message);
+        output += message;
+      });
+
+      pyshell.on('error', (error) => {
+        console.error('Python Error:', error);
+        reject(error);
+      });
+
+      pyshell.end((err) => {
+        if (err) return reject(err);
+        resolve(output);
+      });
+    });
+
+    if (!conversionResult.includes('success')) {
+      throw new Error(conversionResult || 'Conversion failed without error message');
+    }
+
+    // Stream the file back
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
+    fs.createReadStream(outputPath).pipe(res)
+      .on('finish', () => {
+        // Cleanup
+        [pdfPath, outputPath].forEach(file => {
+          fs.unlink(file, (err) => err && console.error('Cleanup error:', err));
+        });
+      });
+
+  } catch (error) {
+    console.error('Conversion error:', error);
+    res.status(500).json({ 
+      error: 'Conversion failed',
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
-
-  const pdfPath = req.file.path;
-  // Use temporary directory in Heroku
-  const outputDir = process.env.TMPDIR || '/tmp';
-  const outputFileName = `${path.parse(req.file.originalname).name}.docx`;
-  const outputPath = path.join(outputDir, outputFileName);
-
-  const options = {
-    mode: 'text',
-    // Let the system determine Python path
-    pythonOptions: ['-u'], // unbuffered output
-    scriptPath: __dirname,
-    args: [pdfPath, outputDir]
-  };
-
-  const pyshell = new PythonShell("./pdf-to-docx/pdf-to-docx-python-script.py", options);
-
-  let pythonOutput = '';
-
-  pyshell.on('message', (message) => {
-    console.log('Python:', message);
-    pythonOutput += message;
-  });
-
-  pyshell.on('error', (error) => {
-    console.error('Python Error:', error);
-    fs.unlink(pdfPath, () => {});
-    res.status(500).json({ error: 'Python script failed', details: error.toString() });
-  });
-
-  pyshell.end((err) => {
-    if (err) {
-      console.error('PythonShell Error:', err);
-      fs.unlink(pdfPath, () => {});
-      return res.status(500).json({ error: 'Conversion failed', details: err.toString() });
-    }
-
-    if (pythonOutput.includes('success')) {
-      // Read the converted file and send it as response
-      fs.readFile(outputPath, (err, data) => {
-        fs.unlink(pdfPath, () => {});
-        
-        if (err) {
-          return res.status(500).json({ error: 'Could not read converted file' });
-        }
-        
-        // Send the file directly since we can't rely on persistent storage
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-        res.setHeader('Content-Disposition', `attachment; filename="${outputFileName}"`);
-        res.send(data);
-        
-        // Clean up
-        fs.unlink(outputPath, () => {});
-      });
-    } else {
-      fs.unlink(pdfPath, () => {});
-      res.status(500).json({ 
-        error: 'Conversion failed',
-        details: pythonOutput || 'Unknown Python script error'
-      });
-    }
-  });
 });
 
 
