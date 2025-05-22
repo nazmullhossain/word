@@ -1,35 +1,34 @@
-# Use an official Python runtime as a parent image
-FROM python:3.8-slim
+# Use a Node.js base image with Python support
+FROM node:22-bullseye
 
-# Install Node.js
-RUN apt-get update && apt-get install -y \
-    curl \
-    && curl -sL https://deb.nodesource.com/setup_14.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+# Install Python and build tools
+RUN apt-get update && \
+    apt-get install -y python3 python3-pip && \
+    rm -rf /var/lib/apt/lists/*
 
-# Set the working directory
-WORKDIR /usr/src/app
+# Set working directory
+WORKDIR /app
 
-# Install Python dependencies first (they change less often)
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Install pdf2docx (or any other Python packages you need)
-RUN pip install pdf2docx
-
-# Copy package.json and package-lock.json and install Node modules
+# Copy package files first (better caching)
 COPY package*.json ./
+
+# Install Node dependencies
 RUN npm install
 
-# Copy the rest of the application
+# Copy Python requirements
+COPY requirements.txt ./
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy all remaining files
 COPY . .
 
-# Make the Python script executable
+# Make Python script executable
 RUN chmod +x ./pdf-to-docx/pdf-to-docx-python-script.py
 
-# Expose the port the app runs on
+# Expose port
 EXPOSE 3000
 
-# Command to run the application
+# Start command
 CMD ["npm", "start"]
