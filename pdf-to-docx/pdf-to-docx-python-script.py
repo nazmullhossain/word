@@ -2,7 +2,6 @@ import sys
 import os
 import json
 from pdf2docx import Converter
-import tempfile
 
 def pdf_to_docx(pdf_path, output_dir):
     try:
@@ -11,20 +10,13 @@ def pdf_to_docx(pdf_path, output_dir):
         docx_name = pdf_name.replace('.pdf', '.docx')
         docx_path = os.path.join(output_dir, docx_name)
 
-        # Use tempfile if output_dir isn't writable
-        temp_output = False
-        if not os.access(output_dir, os.W_OK):
-            temp_output = True
-            docx_path = os.path.join(tempfile.gettempdir(), docx_name)
-
         cv = Converter(pdf_path)
         cv.convert(docx_path, start=0, end=None)
         cv.close()
 
         print(json.dumps({
             "status": "success",
-            "output_path": docx_path,
-            "temp_output": temp_output
+            "output_path": docx_path
         }))
         return True
     except Exception as e:
