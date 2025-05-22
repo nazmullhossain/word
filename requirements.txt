@@ -1,5 +1,4 @@
-pdf2docx==0.5.6
+pdf2docx==0.5.8  # Updated to latest stable version
 PyMuPDF==1.23.8
 python-docx==0.8.11
 pdfminer.six==20221105
-
