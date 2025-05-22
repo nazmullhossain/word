@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF to DOCX Converter</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .upload-container { border: 2px dashed #ccc; padding: 20px; margin: 20px 0; border-radius: 5px; }
+    #fileInput { display: none; }
+    .btn { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+    .btn:hover { background: #45a049; }
+    #status { margin: 20px 0; min-height: 20px; }
+    #downloadLink { display: none; margin-top: 20px; }
+    .spinner { border: 4px solid rgba(0, 0, 0, 0.1); width: 36px; height: 36px; border-radius: 50%; border-left-color: #09f; animation: spin 1s linear infinite; margin: 20px auto; display: none; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <h1>PDF to DOCX Converter</h1>
+  <div class="upload-container">
+    <input type="file" id="fileInput" accept=".pdf">
+    <button class="btn" onclick="document.getElementById('fileInput').click()">Choose PDF</button>
+    <p id="fileName"></p>
+    <button class="btn" id="convertBtn" disabled>Convert to DOCX</button>
+  </div>
+  <div id="status"></div>
+  <div class="spinner" id="spinner"></div>
+  <div id="downloadLink">
+    <p>Conversion complete!</p>
+    <a id="downloadAnchor" href="#" target="_blank">Download DOCX</a>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const convertBtn = document.getElementById('convertBtn');
+    const fileNameDisplay = document.getElementById('fileName');
+    const statusDisplay = document.getElementById('status');
+    const downloadLink = document.getElementById('downloadLink');
+    const downloadAnchor = document.getElementById('downloadAnchor');
+    const spinner = document.getElementById('spinner');
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        fileNameDisplay.textContent = `Selected: ${e.target.files[0].name}`;
+        convertBtn.disabled = false;
+      }
+    });
+
+    convertBtn.addEventListener('click', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append('pdfFile', file);
+
+      statusDisplay.textContent = 'Converting...';
+      spinner.style.display = 'block';
+      convertBtn.disabled = true;
+      downloadLink.style.display = 'none';
+
+      try {
+        const response = await fetch('http://localhost:3000/convert', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+          statusDisplay.textContent = `Error: ${data.error}`;
+        } else {
+          statusDisplay.textContent = 'Success!';
+          downloadAnchor.href = data.downloadLink;
+          downloadAnchor.textContent = `Download ${data.fileName}`;
+          downloadLink.style.display = 'block';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        statusDisplay.textContent = `Error: ${error.message}`;
+      } finally {
+        spinner.style.display = 'none';
+        convertBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
