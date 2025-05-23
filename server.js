@@ -34,13 +34,12 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
     
     // Write buffer to file
     await fs.promises.writeFile(pdfPath, req.file.buffer);
-
-   const options = {
+const options = {
   mode: 'text',
   pythonOptions: ['-u'],
-  scriptPath: __dirname,
+  scriptPath: path.join(__dirname, 'pdf-to-docx'),
   args: [pdfPath, outputPath],
-  pythonPath: process.env.PYTHON_PATH || '/app/.heroku/python/bin/python'
+  pythonPath: process.env.PYTHON_PATH || 'python'
 };
 
 
