@@ -1,38 +1,33 @@
-# Use official Python runtime as a parent image
-FROM python:3.9-slim
+# Use Python 3.10 slim image (matches your local version)
+FROM python:3.10-slim
 
-# Set the working directory to /app
+# Set the working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    python3-dev \
-    python3-pip \
-    python3-setuptools \
-    python3-wheel \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js
-RUN apt-get update && apt-get install -y curl && \
-    curl -sL https://deb.nodesource.com/setup_14.x | bash - && \
+# Install system dependencies (Node.js + build tools)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    build-essential && \
+    curl -fsSL https://deb.nodesource.com/setup_16.x | bash - && \
     apt-get install -y nodejs && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy package.json and package-lock.json first for better caching
-COPY package*.json ./
-
-# Install Node dependencies
-RUN npm install
-
-# Copy the current directory contents into the container
-COPY . .
-
-# Install Python dependencies
+# Install Python dependencies first (better caching)
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Make port 3000 available to the world outside this container
-EXPOSE 3000
+# Install Node dependencies
+COPY package*.json ./
+RUN npm install
 
-# Run the app when the container launches
+# Copy application files
+COPY . .
+
+# Set environment variables
+ENV PORT=3000
+EXPOSE $PORT
+
+# Run the application
 CMD ["node", "server.js"]
