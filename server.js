@@ -10,7 +10,7 @@ const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public'))); // More reliable path joining
 
 // Configure storage - use memory storage for Heroku
 const storage = multer.memoryStorage();
@@ -23,9 +23,11 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
   }
 
   try {
-    // Create a temporary file
-    const tempDir = path.join(__dirname, 'temp');
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+    // Create a temporary directory in /tmp for Heroku compatibility
+    const tempDir = path.join(process.env.TMPDIR || __dirname, 'temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
     
     const pdfPath = path.join(tempDir, `${Date.now()}-${req.file.originalname}`);
     const outputPath = path.join(tempDir, `${path.parse(req.file.originalname).name}.docx`);
@@ -37,7 +39,8 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
       mode: 'text',
       pythonOptions: ['-u'], // unbuffered output
       scriptPath: __dirname,
-      args: [pdfPath, outputPath]
+      args: [pdfPath, outputPath],
+      pythonPath: process.env.PYTHON_PATH || 'python3' // Use Heroku's Python if available
     };
 
     const pyshell = new PythonShell("./pdf-to-docx/pdf-to-docx-python-script.py", options);
@@ -62,11 +65,15 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
       // Read the converted file
       const docxFile = await fs.promises.readFile(outputPath);
       
-      // Clean up files
-      await Promise.all([
-        fs.promises.unlink(pdfPath),
-        fs.promises.unlink(outputPath)
-      ]);
+      // Clean up files (with error handling)
+      try {
+        await Promise.all([
+          fs.promises.unlink(pdfPath).catch(console.error),
+          fs.promises.unlink(outputPath).catch(console.error)
+        ]);
+      } catch (cleanupError) {
+        console.error('Cleanup error:', cleanupError);
+      }
 
       // Send the file directly
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
@@ -86,9 +93,9 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
 
 // Serve frontend
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname,  'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html')); // Adjusted path
 });
 
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
 });
