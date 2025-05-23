@@ -1,7 +1,12 @@
 import sys
 import os
 import json
-from pdf2docx import Converter
+from pdfminer.high_level import extract_pages
+from pdfminer.layout import LTTextContainer, LTFigure
+from docx import Document
+from docx.shared import Inches
+import io
+from PIL import Image
 
 def pdf_to_docx(pdf_path, output_dir):
     try:
@@ -10,9 +15,31 @@ def pdf_to_docx(pdf_path, output_dir):
         docx_name = pdf_name.replace('.pdf', '.docx')
         docx_path = os.path.join(output_dir, docx_name)
 
-        cv = Converter(pdf_path)
-        cv.convert(docx_path, start=0, end=None)
-        cv.close()
+        doc = Document()
+        
+        for page_layout in extract_pages(pdf_path):
+            for element in page_layout:
+                if isinstance(element, LTTextContainer):
+                    # Extract text
+                    text = element.get_text()
+                    # Add paragraph to Word document
+                    paragraph = doc.add_paragraph()
+                    paragraph.add_run(text)
+                elif isinstance(element, LTFigure):
+                    # Handle images (basic implementation)
+                    try:
+                        for img in element:
+                            if hasattr(img, 'stream'):
+                                img_data = img.stream.get_data()
+                                image = Image.open(io.BytesIO(img_data))
+                                img_path = os.path.join(output_dir, 'temp_img.png')
+                                image.save(img_path)
+                                doc.add_picture(img_path, width=Inches(4))
+                                os.remove(img_path)
+                    except Exception as img_error:
+                        print(f"Image processing error: {img_error}")
+
+        doc.save(docx_path)
 
         print(json.dumps({
             "status": "success",

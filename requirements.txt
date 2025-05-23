@@ -1,1 +1,2 @@
-pdf2docx==0.5.7
+pdf2docx
+python-docx
