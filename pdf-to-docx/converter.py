@@ -1,20 +1,24 @@
 import sys
 import traceback
-from pdf2docx import Converter
+
+def check_dependencies():
+    try:
+        from pdf2docx import Converter
+        return True
+    except ImportError as e:
+        print(f"CRITICAL: Required package not found: {e}", file=sys.stderr)
+        print("Please install pdf2docx package using:", file=sys.stderr)
+        print("pip install pdf2docx", file=sys.stderr)
+        return False
 
 def convert_pdf_to_docx(pdf_path, docx_path):
     try:
+        from pdf2docx import Converter
+        
         print(f"Starting conversion: {pdf_path} → {docx_path}")
-        
-        # Initialize converter
         cv = Converter(pdf_path)
-        
-        # Convert all pages
         cv.convert(docx_path, start=0, end=None)
-        
-        # Close the converter
         cv.close()
-        
         print("Conversion completed successfully")
         return True
         
@@ -24,14 +28,15 @@ def convert_pdf_to_docx(pdf_path, docx_path):
         return False
 
 if __name__ == "__main__":
+    if not check_dependencies():
+        sys.exit(1)
+        
     if len(sys.argv) != 3:
         print("Usage: python converter.py <input_pdf> <output_docx>", file=sys.stderr)
         sys.exit(1)
         
     pdf_file = sys.argv[1]
     docx_file = sys.argv[2]
-    
-    print(f"Received arguments: PDF={pdf_file}, DOCX={docx_file}")
     
     success = convert_pdf_to_docx(pdf_file, docx_file)
     
