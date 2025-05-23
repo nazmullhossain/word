@@ -1,20 +1,23 @@
 const express = require('express');
 const multer = require('multer');
 const { PythonShell } = require('python-shell');
-const cors = require('cors');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+const cors = require('cors');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-
-const upload = multer({ storage: multer.memoryStorage() });
+// Configure storage - use memory storage for Heroku
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
 // Serve static files (frontend)
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // POST endpoint for PDF to DOCX conversion
 app.post('/convert', upload.single('pdfFile'), (req, res) => {
@@ -22,49 +25,56 @@ app.post('/convert', upload.single('pdfFile'), (req, res) => {
     return res.status(400).json({ error: 'No file uploaded' });
   }
 
-  // Create a temporary file path
-  const tempPdfPath = `/tmp/${Date.now()}-${req.file.originalname}`;
-  const tempDocxPath = `/tmp/${Date.now()}-${req.file.originalname.replace('.pdf', '.docx')}`;
+  // Create a temporary file
+  const tempDir = path.join(__dirname, 'temp');
+  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+  
+  const pdfPath = path.join(tempDir, `${Date.now()}-${req.file.originalname}`);
+  fs.writeFileSync(pdfPath, req.file.buffer);
 
-  // Write the uploaded file to a temporary location
-  fs.writeFileSync(tempPdfPath, req.file.buffer);
+  const outputFileName = `${path.parse(req.file.originalname).name}.docx`;
+  const outputPath = path.join(tempDir, outputFileName);
 
   const options = {
     mode: 'text',
     pythonOptions: ['-u'], // unbuffered output
-    args: [tempPdfPath, tempDocxPath]
+    scriptPath: __dirname,
+    args: [pdfPath, outputPath]
   };
 
-  const pyshell = new PythonShell("./pdf-to-docx/pdf-to-docx-python-script.py", options);
+  const pyshell = new PythonShell("pdf-to-docx-python-script.py", options);
+
+  let pythonOutput = '';
+
+  pyshell.on('message', (message) => {
+    console.log('Python:', message);
+    pythonOutput += message;
+  });
 
   pyshell.on('error', (error) => {
     console.error('Python Error:', error);
-    cleanupFiles(tempPdfPath, tempDocxPath);
+    cleanupFiles(pdfPath, outputPath);
     res.status(500).json({ error: 'Python script failed', details: error.toString() });
   });
 
   pyshell.end((err) => {
     if (err) {
       console.error('PythonShell Error:', err);
-      cleanupFiles(tempPdfPath, tempDocxPath);
+      cleanupFiles(pdfPath, outputPath);
       return res.status(500).json({ error: 'Conversion failed', details: err.toString() });
     }
 
-    try {
-      if (fs.existsSync(tempDocxPath)) {
-        const docxFile = fs.readFileSync(tempDocxPath);
-        cleanupFiles(tempPdfPath, tempDocxPath);
-        
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-        res.setHeader('Content-Disposition', `attachment; filename="${req.file.originalname.replace('.pdf', '.docx')}"`);
-        res.send(docxFile);
-      } else {
-        cleanupFiles(tempPdfPath, tempDocxPath);
-        res.status(500).json({ error: 'Conversion failed', details: 'Output file not created' });
-      }
-    } catch (e) {
-      cleanupFiles(tempPdfPath, tempDocxPath);
-      res.status(500).json({ error: 'File handling failed', details: e.toString() });
+    if (pythonOutput.includes('success') && fs.existsSync(outputPath)) {
+      res.download(outputPath, outputFileName, (err) => {
+        cleanupFiles(pdfPath, outputPath);
+        if (err) console.error('Error sending file:', err);
+      });
+    } else {
+      cleanupFiles(pdfPath, outputPath);
+      res.status(500).json({ 
+        error: 'Conversion failed',
+        details: pythonOutput || 'Unknown Python script error'
+      });
     }
   });
 });
@@ -74,16 +84,12 @@ function cleanupFiles(...files) {
     if (fs.existsSync(file)) {
       try {
         fs.unlinkSync(file);
-      } catch (e) {
-        console.error(`Error deleting ${file}:`, e);
+      } catch (err) {
+        console.error(`Error deleting ${file}:`, err);
       }
     }
   });
 }
-
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
 
 // Start server
 app.listen(port, () => {

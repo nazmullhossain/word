@@ -1,39 +1,38 @@
-# Use a Node.js base image with Python support
-FROM node:22-bullseye
+# Use official Python runtime as a parent image
+FROM python:3.9-slim
 
-# Install system dependencies including GUI libraries
-RUN apt-get update && \
-    apt-get install -y \
-    python3 \
-    python3-pip \
-    libgl1 \
-    libglib2.0-0 \
-    libgl1-mesa-glx \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
+# Set the working directory to /app
 WORKDIR /app
 
-# Copy package files first (better caching)
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3-dev \
+    python3-pip \
+    python3-setuptools \
+    python3-wheel \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js
+RUN apt-get update && apt-get install -y curl && \
+    curl -sL https://deb.nodesource.com/setup_14.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy package.json and package-lock.json first for better caching
 COPY package*.json ./
 
 # Install Node dependencies
 RUN npm install
 
-# Copy Python requirements
-COPY requirements.txt ./
-
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-# Copy all remaining files
+# Copy the current directory contents into the container
 COPY . .
 
-# Make Python script executable
-RUN chmod +x ./pdf-to-docx/pdf-to-docx-python-script.py
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose port
+# Make port 3000 available to the world outside this container
 EXPOSE 3000
 
-# Start command
-CMD ["npm", "start"]
+# Run the app when the container launches
+CMD ["node", "server.js"]
