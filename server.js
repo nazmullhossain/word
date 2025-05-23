@@ -88,7 +88,11 @@ async function processConversion(jobId, file) {
   const timestamp = Date.now();
   const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_');
   const pdfPath = path.join(tempDir, `input_${timestamp}_${sanitizedFilename}`);
-  const outputPath = path.join(tempDir, `output_${timestamp}_${path.parse(sanitizedFilename).name}.docx`);
+
+  // Save output directly to Downloads folder
+  const homedir = os.homedir();
+  const downloadsDir = path.join(homedir, 'Downloads');
+  const outputPath = path.join(downloadsDir, `output_${timestamp}_${path.parse(sanitizedFilename).name}.docx`);
 
   try {
     // Write PDF to disk
@@ -112,8 +116,8 @@ async function processConversion(jobId, file) {
       pyshell.on('message', (message) => {
         console.log(`Job ${jobId}:`, message);
         output += message;
-        jobStore.set(jobId, { 
-          ...jobStore.get(jobId), 
+        jobStore.set(jobId, {
+          ...jobStore.get(jobId),
           progress: Math.min(jobStore.get(jobId).progress + 10, 90)
         });
       });
@@ -133,17 +137,16 @@ async function processConversion(jobId, file) {
       status: 'completed',
       progress: 100,
       result: docxBuffer.toString('base64'),
-      completedAt: new Date()
+      completedAt: new Date(),
+      filePath: outputPath
     });
 
   } catch (error) {
     throw new Error(`Conversion failed: ${error.message}`);
   } finally {
-    // Cleanup
-    await Promise.all([
-      fs.unlink(pdfPath).catch(() => {}),
-      fs.unlink(outputPath).catch(() => {})
-    ]);
+    // Cleanup temp input PDF
+    await fs.unlink(pdfPath).catch(() => {});
+    // NOTE: outputPath is in Downloads and should not be deleted
   }
 }
 
