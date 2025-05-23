@@ -1,35 +1,43 @@
 import sys
-import os
-import json
-from pdfminer.high_level import extract_text
-from docx import Document
+import traceback
+from pdf2docx import Converter
 
 def convert_pdf_to_docx(pdf_path, docx_path):
     try:
-        text = extract_text(pdf_path)
-        doc = Document()
+        print(f"Starting conversion: {pdf_path} → {docx_path}")
         
-        # Preserve paragraphs
-        for paragraph in text.split('\n\n'):
-            if paragraph.strip():
-                doc.add_paragraph(paragraph)
+        # Initialize converter
+        cv = Converter(pdf_path)
         
-        doc.save(docx_path)
+        # Convert all pages
+        cv.convert(docx_path, start=0, end=None)
+        
+        # Close the converter
+        cv.close()
+        
+        print("Conversion completed successfully")
         return True
+        
     except Exception as e:
-        print(json.dumps({
-            "status": "error",
-            "message": f"Conversion failed: {str(e)}"
-        }))
+        print(f"ERROR: {str(e)}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return False
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print(json.dumps({
-            "status": "error",
-            "message": "Usage: python script.py <pdf_path> <docx_path>"
-        }))
+        print("Usage: python converter.py <input_pdf> <output_docx>", file=sys.stderr)
         sys.exit(1)
         
-    success = convert_pdf_to_docx(sys.argv[1], sys.argv[2])
-    sys.exit(0 if success else 1)
+    pdf_file = sys.argv[1]
+    docx_file = sys.argv[2]
+    
+    print(f"Received arguments: PDF={pdf_file}, DOCX={docx_file}")
+    
+    success = convert_pdf_to_docx(pdf_file, docx_file)
+    
+    if success:
+        print('{"status": "success"}')
+        sys.exit(0)
+    else:
+        print('{"status": "error", "message": "PDF conversion failed"}', file=sys.stderr)
+        sys.exit(1)

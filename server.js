@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const multer = require('multer');
 const { PythonShell } = require('python-shell');
@@ -11,12 +12,15 @@ const PORT = process.env.PORT || 3000;
 
 // Enhanced CORS configuration
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*'
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type']
 }));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Configure storage with file size limits
+// Configure multer storage
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
@@ -25,11 +29,21 @@ const upload = multer({
 
 // Create temp directory on startup
 const tempDir = path.join(os.tmpdir(), 'pdf-conversions');
-fs.mkdir(tempDir, { recursive: true })
-  .then(() => console.log(`Temporary directory ready: ${tempDir}`))
-  .catch(err => console.error('Failed to create temp directory:', err));
+(async () => {
+  try {
+    await fs.mkdir(tempDir, { recursive: true });
+    console.log(`Temporary directory ready: ${tempDir}`);
+  } catch (err) {
+    console.error('Failed to create temp directory:', err);
+  }
+})();
 
-// POST endpoint for PDF to DOCX conversion
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
+// Conversion endpoint
 app.post('/convert', upload.single('pdfFile'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
@@ -51,52 +65,27 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
     // Write buffer to file
     await fs.writeFile(pdfPath, req.file.buffer);
 
-    // Configure PythonShell with proper paths
+    // Configure PythonShell
     const options = {
       mode: 'text',
       pythonOptions: ['-u'],
       scriptPath: path.join(__dirname, 'pdf-to-docx'),
-      args: [
-        pdfPath, 
-        outputPath,
-        '--debug' // Add debug flag if needed
-      ],
+      args: [pdfPath, outputPath],
       pythonPath: process.env.PYTHON_PATH || 'python3'
     };
 
-    console.log('PythonShell options:', options);
+    console.log('Starting Python conversion with options:', options);
 
-    const result = await new Promise((resolve, reject) => {
-      const pyshell = new PythonShell('converter.py', options);
-      let output = '';
+    const { output, error } = await executePythonScript(options);
 
-      pyshell.on('message', (message) => {
-        console.log('Python:', message);
-        output += message;
-      });
-
-      pyshell.on('error', (error) => {
-        console.error('PythonShell error:', error);
-        reject(new Error(`Python error: ${error.message}`));
-      });
-
-      pyshell.end((err) => {
-        if (err) {
-          reject(new Error(`Python process failed: ${err.message}`));
-        } else {
-          resolve(output);
-        }
-      });
-    });
-
-    // Check if output file exists
+    // Verify output file was created
     try {
       await fs.access(outputPath);
     } catch {
-      throw new Error(result || 'Conversion failed - no output file created');
+      throw new Error(error || 'Conversion failed - no output file created');
     }
 
-    // Read and send the converted file
+    // Send the converted file
     const docxFile = await fs.readFile(outputPath);
     
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
@@ -109,23 +98,59 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
       error: 'Conversion failed',
       details: error.message,
       ...(process.env.NODE_ENV === 'development' && {
-        stack: error.stack,
-        pythonOutput: result
+        stack: error.stack
       })
     });
   } finally {
     // Cleanup files
-    const cleanup = async (filePath) => {
-      try {
-        if (filePath) await fs.unlink(filePath);
-      } catch (err) {
-        console.error(`Failed to cleanup ${filePath}:`, err);
-      }
-    };
-    
-    await Promise.all([cleanup(pdfPath), cleanup(outputPath)]);
+    await cleanupFiles([pdfPath, outputPath]);
   }
 });
+
+// Helper function to execute Python script
+async function executePythonScript(options) {
+  return new Promise((resolve, reject) => {
+    const pyshell = new PythonShell('converter.py', options);
+    let output = '';
+    let error = '';
+
+    pyshell.on('message', (message) => {
+      console.log('Python stdout:', message);
+      output += message;
+    });
+
+    pyshell.on('stderr', (stderr) => {
+      console.error('Python stderr:', stderr);
+      error += stderr;
+    });
+
+    pyshell.on('error', (err) => {
+      console.error('PythonShell error:', err);
+      error += err.message;
+    });
+
+    pyshell.end((err) => {
+      if (err || error) {
+        reject(new Error(error || 'Python process failed'));
+      } else {
+        resolve({ output, error });
+      }
+    });
+  });
+}
+
+// Helper function to cleanup files
+async function cleanupFiles(filePaths) {
+  await Promise.all(
+    filePaths.filter(Boolean).map(async (filePath) => {
+      try {
+        await fs.unlink(filePath);
+      } catch (err) {
+        console.error(`Failed to delete ${filePath}:`, err);
+      }
+    })
+  );
+}
 
 // Serve frontend
 app.get('*', (req, res) => {
