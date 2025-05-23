@@ -1,33 +1,29 @@
-# Use Python 3.10 slim image (matches your local version)
-FROM python:3.10-slim
+# Use a more stable base image
+FROM python:3.10-slim-buster
 
-# Set the working directory
 WORKDIR /app
 
-# Install system dependencies (Node.js + build tools)
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    curl \
-    build-essential && \
+    build-essential \
+    curl && \
     curl -fsSL https://deb.nodesource.com/setup_16.x | bash - && \
     apt-get install -y nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies first (better caching)
+# Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Install Node dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm install --production
 
 # Copy application files
 COPY . .
 
-# Set environment variables
 ENV PORT=3000
 EXPOSE $PORT
-
-# Run the application
 CMD ["node", "server.js"]
