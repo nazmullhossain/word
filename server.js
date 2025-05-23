@@ -92,8 +92,8 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
 });
 
 // Serve frontend
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html')); // Adjusted path
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname,  'index.html')); // Adjusted path
 });
 
 app.listen(port, '0.0.0.0', () => {
