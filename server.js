@@ -4,20 +4,29 @@ const { PythonShell } = require('python-shell');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
+const os = require('os'); // Add this to get the system's home directory
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Configure storage - use memory storage for Heroku
-const storage = multer.memoryStorage();
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  }
+});
+
 const upload = multer({ storage });
 
+// Ensure uploads directory exists
+if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+
 // Serve static files (frontend)
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static('public'));
 
 // POST endpoint for PDF to DOCX conversion
 app.post('/convert', upload.single('pdfFile'), (req, res) => {
@@ -25,24 +34,20 @@ app.post('/convert', upload.single('pdfFile'), (req, res) => {
     return res.status(400).json({ error: 'No file uploaded' });
   }
 
-  // Create a temporary file
-  const tempDir = path.join(__dirname, 'temp');
-  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-  
-  const pdfPath = path.join(tempDir, `${Date.now()}-${req.file.originalname}`);
-  fs.writeFileSync(pdfPath, req.file.buffer);
-
+  const pdfPath = req.file.path;
+  // Get the system's Downloads folder path
+  const downloadsPath = path.join(os.homedir(), 'Downloads');
   const outputFileName = `${path.parse(req.file.originalname).name}.docx`;
-  const outputPath = path.join(tempDir, outputFileName);
+  const outputPath = path.join(downloadsPath, outputFileName);
 
   const options = {
     mode: 'text',
-    pythonOptions: ['-u'], // unbuffered output
+    pythonPath: 'C:\\Users\\APP_DEV_2\\AppData\\Local\\Programs\\Python\\Python313\\python.exe',
     scriptPath: __dirname,
-    args: [pdfPath, outputPath]
+    args: [pdfPath, downloadsPath] // Pass the Downloads folder path to Python
   };
 
-  const pyshell = new PythonShell("pdf-to-docx-python-script.py", options);
+  const pyshell = new PythonShell("./pdf-to-docx/pdf-to-docx-python-script.py", options);
 
   let pythonOutput = '';
 
@@ -53,24 +58,29 @@ app.post('/convert', upload.single('pdfFile'), (req, res) => {
 
   pyshell.on('error', (error) => {
     console.error('Python Error:', error);
-    cleanupFiles(pdfPath, outputPath);
+    fs.unlink(pdfPath, () => {});
     res.status(500).json({ error: 'Python script failed', details: error.toString() });
   });
 
   pyshell.end((err) => {
     if (err) {
       console.error('PythonShell Error:', err);
-      cleanupFiles(pdfPath, outputPath);
+      fs.unlink(pdfPath, () => {});
       return res.status(500).json({ error: 'Conversion failed', details: err.toString() });
     }
 
-    if (pythonOutput.includes('success') && fs.existsSync(outputPath)) {
-      res.download(outputPath, outputFileName, (err) => {
-        cleanupFiles(pdfPath, outputPath);
-        if (err) console.error('Error sending file:', err);
+    if (pythonOutput.includes('success')) {
+      fs.unlink(pdfPath, (err) => {
+        if (err) console.error('Error deleting PDF:', err);
+      });
+      res.json({ 
+        success: true,
+        // Since the file is in Downloads, we can't serve it directly, so just return the path
+        filePath: outputPath,
+        fileName: outputFileName
       });
     } else {
-      cleanupFiles(pdfPath, outputPath);
+      fs.unlink(pdfPath, () => {});
       res.status(500).json({ 
         error: 'Conversion failed',
         details: pythonOutput || 'Unknown Python script error'
@@ -79,17 +89,9 @@ app.post('/convert', upload.single('pdfFile'), (req, res) => {
   });
 });
 
-function cleanupFiles(...files) {
-  files.forEach(file => {
-    if (fs.existsSync(file)) {
-      try {
-        fs.unlinkSync(file);
-      } catch (err) {
-        console.error(`Error deleting ${file}:`, err);
-      }
-    }
-  });
-}
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // Start server
 app.listen(port, () => {
