@@ -10,7 +10,7 @@ const port = process.env.PORT || 3000;
 
 app.use(cors());
 
-// Use memory storage instead of disk storage
+
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Serve static files (frontend)
