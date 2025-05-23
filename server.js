@@ -6,44 +6,43 @@ const path = require('path');
 const fs = require('fs').promises;
 const cors = require('cors');
 const os = require('os');
+const crypto = require('crypto');
+const { promisify } = require('util');
+const sleep = promisify(setTimeout);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enhanced CORS configuration
+// Configure middleware
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type']
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*'
 }));
-
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '20mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Configure multer storage
+// In-memory job store (replace with Redis in production)
+const jobStore = new Map();
+
+// Configure file upload
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit
 });
-
-// Create temp directory on startup
-const tempDir = path.join(os.tmpdir(), 'pdf-conversions');
-(async () => {
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
-    console.log(`Temporary directory ready: ${tempDir}`);
-  } catch (err) {
-    console.error('Failed to create temp directory:', err);
-  }
-})();
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
-// Conversion endpoint
+// Conversion status endpoint
+app.get('/status/:jobId', (req, res) => {
+  const job = jobStore.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
+});
+
+// File conversion endpoint
 app.post('/convert', upload.single('pdfFile'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
@@ -54,18 +53,49 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
     return res.status(400).json({ error: 'Only PDF files are allowed' });
   }
 
-  let pdfPath, outputPath;
-  try {
-    // Sanitize filename
-    const sanitizedFilename = req.file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    const timestamp = Date.now();
-    pdfPath = path.join(tempDir, `input_${timestamp}_${sanitizedFilename}`);
-    outputPath = path.join(tempDir, `output_${timestamp}_${path.parse(sanitizedFilename).name}.docx`);
-    
-    // Write buffer to file
-    await fs.writeFile(pdfPath, req.file.buffer);
+  // Create job ID
+  const jobId = crypto.randomBytes(8).toString('hex');
+  jobStore.set(jobId, {
+    status: 'processing',
+    progress: 0,
+    createdAt: new Date()
+  });
 
-    // Configure PythonShell
+  // Start background processing
+  processConversion(jobId, req.file)
+    .catch(err => {
+      console.error(`Job ${jobId} failed:`, err);
+      jobStore.set(jobId, {
+        status: 'failed',
+        error: err.message,
+        completedAt: new Date()
+      });
+    });
+
+  // Immediate response
+  res.status(202).json({
+    status: 'processing',
+    jobId,
+    message: `Conversion started. Poll /status/${jobId} for updates`
+  });
+});
+
+// Background processing function
+async function processConversion(jobId, file) {
+  const tempDir = path.join(os.tmpdir(), 'pdf-conversions');
+  await fs.mkdir(tempDir, { recursive: true });
+
+  const timestamp = Date.now();
+  const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const pdfPath = path.join(tempDir, `input_${timestamp}_${sanitizedFilename}`);
+  const outputPath = path.join(tempDir, `output_${timestamp}_${path.parse(sanitizedFilename).name}.docx`);
+
+  try {
+    // Write PDF to disk
+    await fs.writeFile(pdfPath, file.buffer);
+    jobStore.set(jobId, { ...jobStore.get(jobId), progress: 20 });
+
+    // Configure Python conversion
     const options = {
       mode: 'text',
       pythonOptions: ['-u'],
@@ -74,102 +104,51 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
       pythonPath: process.env.PYTHON_PATH || 'python3'
     };
 
-    console.log('Starting Python conversion with options:', options);
+    // Execute conversion
+    const result = await new Promise((resolve, reject) => {
+      const pyshell = new PythonShell('converter.py', options);
+      let output = '';
 
-    const { output, error } = await executePythonScript(options);
+      pyshell.on('message', (message) => {
+        console.log(`Job ${jobId}:`, message);
+        output += message;
+        jobStore.set(jobId, { 
+          ...jobStore.get(jobId), 
+          progress: Math.min(jobStore.get(jobId).progress + 10, 90)
+        });
+      });
 
-    // Verify output file was created
-    try {
-      await fs.access(outputPath);
-    } catch {
-      throw new Error(error || 'Conversion failed - no output file created');
-    }
+      pyshell.end((err) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
 
-    // Send the converted file
-    const docxFile = await fs.readFile(outputPath);
-    
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(outputPath)}"`);
-    return res.send(docxFile);
+    // Verify output
+    await fs.access(outputPath);
+    const docxBuffer = await fs.readFile(outputPath);
+
+    // Update job status
+    jobStore.set(jobId, {
+      status: 'completed',
+      progress: 100,
+      result: docxBuffer.toString('base64'),
+      completedAt: new Date()
+    });
 
   } catch (error) {
-    console.error('Conversion error:', error);
-    return res.status(500).json({ 
-      error: 'Conversion failed',
-      details: error.message,
-      ...(process.env.NODE_ENV === 'development' && {
-        stack: error.stack
-      })
-    });
+    throw new Error(`Conversion failed: ${error.message}`);
   } finally {
-    // Cleanup files
-    await cleanupFiles([pdfPath, outputPath]);
+    // Cleanup
+    await Promise.all([
+      fs.unlink(pdfPath).catch(() => {}),
+      fs.unlink(outputPath).catch(() => {})
+    ]);
   }
-});
-
-// Helper function to execute Python script
-async function executePythonScript(options) {
-  return new Promise((resolve, reject) => {
-    const pyshell = new PythonShell('converter.py', options);
-    let output = '';
-    let error = '';
-
-    pyshell.on('message', (message) => {
-      console.log('Python stdout:', message);
-      output += message;
-    });
-
-    pyshell.on('stderr', (stderr) => {
-      console.error('Python stderr:', stderr);
-      error += stderr;
-    });
-
-    pyshell.on('error', (err) => {
-      console.error('PythonShell error:', err);
-      error += err.message;
-    });
-
-    pyshell.end((err) => {
-      if (err || error) {
-        reject(new Error(error || 'Python process failed'));
-      } else {
-        resolve({ output, error });
-      }
-    });
-  });
 }
 
-// Helper function to cleanup files
-async function cleanupFiles(filePaths) {
-  await Promise.all(
-    filePaths.filter(Boolean).map(async (filePath) => {
-      try {
-        await fs.unlink(filePath);
-      } catch (err) {
-        console.error(`Failed to delete ${filePath}:`, err);
-      }
-    })
-  );
-}
-
-// Serve frontend
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({ 
-    error: 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && {
-      details: err.message,
-      stack: err.stack
-    })
-  });
-});
-
+// Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Temporary files directory: ${tempDir}`);
+  console.log(`Temp directory: ${path.join(os.tmpdir(), 'pdf-conversions')}`);
 });
