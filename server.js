@@ -35,13 +35,14 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
     // Write buffer to file
     await fs.promises.writeFile(pdfPath, req.file.buffer);
 
-    const options = {
-      mode: 'text',
-      pythonOptions: ['-u'], // unbuffered output
-      scriptPath: __dirname,
-      args: [pdfPath, outputPath],
-      pythonPath: process.env.PYTHON_PATH || 'python3' // Use Heroku's Python if available
-    };
+   const options = {
+  mode: 'text',
+  pythonOptions: ['-u'],
+  scriptPath: __dirname,
+  args: [pdfPath, outputPath],
+  pythonPath: process.env.PYTHON_PATH || '/app/.heroku/python/bin/python'
+};
+
 
     const pyshell = new PythonShell("./pdf-to-docx/pdf-to-docx-python-script.py", options);
 
