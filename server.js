@@ -4,96 +4,91 @@ const { PythonShell } = require('python-shell');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
-const os = require('os'); // Add this to get the system's home directory
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
-
-const upload = multer({ storage });
-
-// Ensure uploads directory exists
-if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
-
-// Serve static files (frontend)
+app.use(express.json());
 app.use(express.static('public'));
 
+// Configure storage - use memory storage for Heroku
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
 // POST endpoint for PDF to DOCX conversion
-app.post('/convert', upload.single('pdfFile'), (req, res) => {
+app.post('/convert', upload.single('pdfFile'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
 
-  const pdfPath = req.file.path;
-  // Get the system's Downloads folder path
-  const downloadsPath = path.join(os.homedir(), 'Downloads');
-  const outputFileName = `${path.parse(req.file.originalname).name}.docx`;
-  const outputPath = path.join(downloadsPath, outputFileName);
+  try {
+    // Create a temporary file
+    const tempDir = path.join(__dirname, 'temp');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+    
+    const pdfPath = path.join(tempDir, `${Date.now()}-${req.file.originalname}`);
+    const outputPath = path.join(tempDir, `${path.parse(req.file.originalname).name}.docx`);
+    
+    // Write buffer to file
+    await fs.promises.writeFile(pdfPath, req.file.buffer);
 
-  const options = {
-    mode: 'text',
-    pythonPath: 'C:\\Users\\APP_DEV_2\\AppData\\Local\\Programs\\Python\\Python313\\python.exe',
-    scriptPath: __dirname,
-    args: [pdfPath, downloadsPath] // Pass the Downloads folder path to Python
-  };
+    const options = {
+      mode: 'text',
+      pythonOptions: ['-u'], // unbuffered output
+      scriptPath: __dirname,
+      args: [pdfPath, outputPath]
+    };
 
-  const pyshell = new PythonShell("./pdf-to-docx/pdf-to-docx-python-script.py", options);
+    const pyshell = new PythonShell("./pdf-to-docx/pdf-to-docx-python-script.py", options);
 
-  let pythonOutput = '';
+    let pythonOutput = '';
 
-  pyshell.on('message', (message) => {
-    console.log('Python:', message);
-    pythonOutput += message;
-  });
+    pyshell.on('message', (message) => {
+      console.log('Python:', message);
+      pythonOutput += message;
+    });
 
-  pyshell.on('error', (error) => {
-    console.error('Python Error:', error);
-    fs.unlink(pdfPath, () => {});
-    res.status(500).json({ error: 'Python script failed', details: error.toString() });
-  });
-
-  pyshell.end((err) => {
-    if (err) {
-      console.error('PythonShell Error:', err);
-      fs.unlink(pdfPath, () => {});
-      return res.status(500).json({ error: 'Conversion failed', details: err.toString() });
-    }
-
-    if (pythonOutput.includes('success')) {
-      fs.unlink(pdfPath, (err) => {
-        if (err) console.error('Error deleting PDF:', err);
+    const result = await new Promise((resolve, reject) => {
+      pyshell.on('error', reject);
+      
+      pyshell.end((err) => {
+        if (err) return reject(err);
+        resolve(pythonOutput);
       });
-      res.json({ 
-        success: true,
-        // Since the file is in Downloads, we can't serve it directly, so just return the path
-        filePath: outputPath,
-        fileName: outputFileName
-      });
+    });
+
+    if (result.includes('success')) {
+      // Read the converted file
+      const docxFile = await fs.promises.readFile(outputPath);
+      
+      // Clean up files
+      await Promise.all([
+        fs.promises.unlink(pdfPath),
+        fs.promises.unlink(outputPath)
+      ]);
+
+      // Send the file directly
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${path.basename(outputPath)}"`);
+      return res.send(docxFile);
     } else {
-      fs.unlink(pdfPath, () => {});
-      res.status(500).json({ 
-        error: 'Conversion failed',
-        details: pythonOutput || 'Unknown Python script error'
-      });
+      throw new Error(result || 'Conversion failed');
     }
-  });
+  } catch (error) {
+    console.error('Conversion error:', error);
+    return res.status(500).json({ 
+      error: 'Conversion failed',
+      details: error.message
+    });
+  }
 });
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+// Serve frontend
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname,  'index.html'));
 });
 
-// Start server
 app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+  console.log(`Server running on port ${port}`);
 });

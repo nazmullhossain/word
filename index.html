@@ -60,7 +60,7 @@
       downloadLink.style.display = 'none';
 
       try {
-        const response = await fetch('https://wordgraphics-abfa9e51e858.herokuapp.com/convert', {
+        const response = await fetch('http://localhost:3000/convert', {
           method: 'POST',
           body: formData
         });
