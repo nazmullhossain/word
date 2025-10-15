@@ -13,10 +13,12 @@ const sleep = promisify(setTimeout);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enhanced configuration
+// Enhanced configuration with better path handling
 const MAX_FILE_SIZE = process.env.MAX_FILE_SIZE || 20 * 1024 * 1024; // 20MB default
 const CONVERSION_TIMEOUT = process.env.CONVERSION_TIMEOUT || 300000; // 5 minutes
-const OUTPUT_DIR = process.env.OUTPUT_DIR || path.join(os.homedir(), 'Downloads');
+
+// Use current working directory for outputs to avoid permission issues
+const OUTPUT_DIR = process.env.OUTPUT_DIR || path.join(process.cwd(), 'converted-files');
 const TEMP_DIR = path.join(os.tmpdir(), 'pdf-conversions');
 
 // Configure middleware with enhanced security
@@ -44,6 +46,7 @@ const cleanupInterval = setInterval(() => {
 async function cleanupJobFiles(job) {
   try {
     if (job.filePath) await fs.unlink(job.filePath).catch(() => {});
+    if (job.tempFilePath) await fs.unlink(job.tempFilePath).catch(() => {});
   } catch (err) {
     console.error(`Failed to cleanup files for job: ${err.message}`);
   }
@@ -81,7 +84,8 @@ app.get('/health', (req, res) => {
     memoryUsage: process.memoryUsage(),
     diskInfo: {
       tempDir: TEMP_DIR,
-      outputDir: OUTPUT_DIR
+      outputDir: OUTPUT_DIR,
+      cwd: process.cwd()
     }
   });
 });
@@ -174,20 +178,26 @@ app.post('/convert', upload.single('pdfFile'), async (req, res) => {
   });
 });
 
-// Enhanced conversion function
+// Enhanced conversion function with better directory handling
 async function processConversion(jobId, file) {
+  let pdfPath, outputPath;
+  
   try {
+    // Ensure directories exist
     await fs.mkdir(TEMP_DIR, { recursive: true });
-    await fs.mkdir(OUTPUT_DIR, { recursive: true }).catch(() => {});
+    await fs.mkdir(OUTPUT_DIR, { recursive: true });
 
     const timestamp = Date.now();
     const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    const pdfPath = path.join(TEMP_DIR, `input_${timestamp}_${sanitizedFilename}`);
+    pdfPath = path.join(TEMP_DIR, `input_${timestamp}_${sanitizedFilename}`);
     const baseName = path.parse(sanitizedFilename).name.replace(/\.pdf$/i, '');
-    const outputPath = path.join(OUTPUT_DIR, `converted_${baseName}_${timestamp}.docx`);
+    outputPath = path.join(OUTPUT_DIR, `converted_${baseName}_${timestamp}.docx`);
+
+    console.log(`[DEBUG] Writing PDF to: ${pdfPath}`);
+    console.log(`[DEBUG] Output will be: ${outputPath}`);
 
     await fs.writeFile(pdfPath, file.buffer);
-    jobStore.set(jobId, { ...jobStore.get(jobId), progress: 10 });
+    jobStore.set(jobId, { ...jobStore.get(jobId), progress: 10, tempFilePath: pdfPath });
 
     // Verify Python script exists
     const scriptPath = path.join(__dirname, 'pdf-to-docx', 'converter.py');
@@ -206,6 +216,7 @@ async function processConversion(jobId, file) {
       timeout: CONVERSION_TIMEOUT - 10000 // Leave 10s buffer
     };
 
+    console.log(`[DEBUG] Starting Python conversion...`);
     const result = await new Promise((resolve, reject) => {
       const pyshell = new PythonShell('converter.py', options);
       let output = '';
@@ -229,6 +240,7 @@ async function processConversion(jobId, file) {
       });
     });
 
+    // Check if output file was created
     await fs.access(outputPath);
     const stats = await fs.stat(outputPath);
     
@@ -245,17 +257,17 @@ async function processConversion(jobId, file) {
       completedAt: new Date()
     });
 
+    console.log(`[SUCCESS] Job ${jobId} completed successfully`);
+
   } catch (error) {
-    throw new Error(`Conversion failed: ${error.message}`);
-  } finally {
-    // Cleanup temp files
-    const pdfPath = path.join(TEMP_DIR, `input_*_${file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_')}`);
-    const files = await fs.readdir(TEMP_DIR).catch(() => []);
-    for (const file of files) {
-      if (file.startsWith(`input_`) && file.endsWith(path.basename(pdfPath))) {
-        await fs.unlink(path.join(TEMP_DIR, file)).catch(() => {});
-      }
+    // Cleanup on error
+    if (pdfPath) {
+      await fs.unlink(pdfPath).catch(() => {});
     }
+    if (outputPath) {
+      await fs.unlink(outputPath).catch(() => {});
+    }
+    throw new Error(`Conversion failed: ${error.message}`);
   }
 }
 
@@ -272,10 +284,26 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Temp directory: ${TEMP_DIR}`);
-  console.log(`Output directory: ${OUTPUT_DIR}`);
-  console.log(`Max file size: ${MAX_FILE_SIZE/1024/1024}MB`);
-});
+// Initialize and start server
+async function initializeServer() {
+  try {
+    // Ensure directories exist on startup
+    await fs.mkdir(TEMP_DIR, { recursive: true });
+    await fs.mkdir(OUTPUT_DIR, { recursive: true });
+    
+    console.log(`Server initialized successfully`);
+    console.log(`Temp directory: ${TEMP_DIR}`);
+    console.log(`Output directory: ${OUTPUT_DIR}`);
+    console.log(`Current working directory: ${process.cwd()}`);
+    
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`Max file size: ${MAX_FILE_SIZE/1024/1024}MB`);
+    });
+  } catch (error) {
+    console.error('Failed to initialize server:', error);
+    process.exit(1);
+  }
+}
+
+initializeServer();
